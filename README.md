@@ -404,7 +404,7 @@ Search for work package by ID: "123"
 #### 5. `list_custom_field_values`
 List allowed values for work package custom fields such as list/select options.
 
-OpenProject only exposes custom-field option lists on the work package form endpoint. Use this before setting list custom fields via `set_work_package_attributes`.
+OpenProject only exposes custom-field option lists on the work package form endpoint. Use this before setting list custom fields via `set_work_package_attributes`. Multi-select fields are set as arrays, e.g. `customField4: [10, 62]`.
 
 **Parameters:**
 - `work_package_id` (integer, optional): Existing work package ID

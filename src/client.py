@@ -571,7 +571,7 @@ class OpenProjectClient:
         from src.utils.work_package_attributes import build_update_payload
 
         current_wp = await self.get_work_package(work_package_id)
-        schema = await self.get_work_package_schema(work_package_id)
+        schema = await self.get_work_package_form_schema(work_package_id)
 
         payload = build_update_payload(attributes, schema)
         payload["lockVersion"] = current_wp.get("lockVersion", 0)

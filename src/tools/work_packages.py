@@ -54,7 +54,9 @@ class SetWorkPackageAttributesInput(BaseModel):
         description=(
             "Attributes to set. Supports standard fields (subject, status_id, assignee_id, "
             "responsible_id, start_date, percentage_done), camelCase API names, and custom fields "
-            "(customField1, custom_field_12). Use null to clear link-backed fields."
+            "(customField1, custom_field_12). Use null to clear link-backed fields. "
+            "Multi-select list custom fields accept arrays of option IDs or titles, e.g. "
+            "customField4: [10, 62] or [\"Formumat\", \"Core\"]; use [] or null to clear."
         ),
     )
     validate_form: bool = Field(
@@ -762,6 +764,8 @@ async def set_work_package_attributes(input: SetWorkPackageAttributesInput) -> s
 
     Supports standard fields, snake_case aliases (assignee_id, responsible_id, start_date),
     camelCase API names (customField1), and HAL link values ({\"href\": \"/api/v3/users/7\"}).
+    Multi-select list custom fields (`[]CustomOption`) accept arrays of option IDs or titles;
+    use `list_custom_field_values` first to discover allowed values. Pass `[]` or `null` to clear.
     Uses OpenProject optimistic locking (lockVersion) and optionally validates via the
     work package form endpoint before applying changes.
 
@@ -788,6 +792,14 @@ async def set_work_package_attributes(input: SetWorkPackageAttributesInput) -> s
             "work_package_id": 123,
             "attributes": {
                 "assignee_id": null
+            }
+        }
+
+        Set multi-select custom field dot-Komponenten:
+        {
+            "work_package_id": 1964,
+            "attributes": {
+                "customField4": [10, 62]
             }
         }
     """

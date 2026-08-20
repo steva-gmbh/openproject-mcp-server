@@ -180,6 +180,78 @@ def extract_attribute_value(
     return None
 
 
+def is_multi_value_field(field_type: Optional[str]) -> bool:
+    """Return True when a schema field type stores multiple link values."""
+    return bool(field_type and field_type.startswith("[]"))
+
+
+def base_field_type(field_type: Optional[str]) -> Optional[str]:
+    """Strip the OpenProject array prefix from a schema field type."""
+    if field_type and field_type.startswith("[]"):
+        return field_type[2:]
+    return field_type
+
+
+def normalize_multi_value_input(value: Any) -> List[Any]:
+    """Coerce agent-friendly multi-value input into a list of items."""
+    if value is None:
+        return []
+
+    if isinstance(value, list):
+        return value
+
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return []
+        if "," in stripped:
+            return [part.strip() for part in stripped.split(",") if part.strip()]
+        return [stripped]
+
+    return [value]
+
+
+def resolve_custom_option_item(
+    value: Any, allowed_values: List[Dict[str, Any]]
+) -> Any:
+    """Resolve a custom option input to an id, href dict, or pass-through value."""
+    if isinstance(value, dict):
+        return value
+
+    if isinstance(value, int):
+        return value
+
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("Empty custom option value")
+
+        if stripped.startswith("/") or stripped.startswith("/api/v3"):
+            return stripped
+        if stripped.isdigit():
+            return int(stripped)
+
+        for option in allowed_values:
+            option_value = option.get("value")
+            if option_value is not None and option_value.casefold() == stripped.casefold():
+                return option.get("id")
+
+        raise ValueError(f"Unknown custom option value: {value}")
+
+    raise ValueError(f"Invalid custom option value: {value!r}")
+
+
+def prepare_link_item_value(
+    field_name: str,
+    item: Any,
+    schema_prop: Optional[Dict[str, Any]] = None,
+) -> Any:
+    """Validate one item in a multi-value link field before href resolution."""
+    if item is None:
+        raise ValueError(f"Invalid link value for {field_name}: null list item")
+    return item
+
+
 def resolve_link_href(
     field_name: str,
     value: Any,
@@ -223,6 +295,7 @@ def resolve_link_href(
         return LINK_FIELD_PATHS[field_name].format(id=value)
 
     prop_type = schema_prop.get("type") if schema_prop else None
+    base_type = base_field_type(prop_type)
     type_paths = {
         "User": "/api/v3/users/{id}",
         "Version": "/api/v3/versions/{id}",
@@ -235,8 +308,8 @@ def resolve_link_href(
         "WorkPackage": "/api/v3/work_packages/{id}",
     }
 
-    if prop_type in type_paths:
-        return type_paths[prop_type].format(id=value)
+    if base_type in type_paths:
+        return type_paths[base_type].format(id=value)
 
     if field_name.startswith("customField"):
         return f"/api/v3/custom_options/{value}"
@@ -247,16 +320,46 @@ def resolve_link_href(
     )
 
 
-def build_link_payload(
+def build_single_link_payload(
     field_name: str,
     value: Any,
     schema_prop: Optional[Dict[str, Any]] = None,
-) -> Optional[Dict[str, Any]]:
-    """Build a HAL link object for the PATCH payload."""
+) -> Dict[str, Any]:
+    """Build a single HAL link object for the PATCH payload."""
+    if is_custom_option_field(base_field_type(schema_prop.get("type") if schema_prop else None)):
+        if schema_prop and not isinstance(value, dict):
+            allowed_values = parse_allowed_values(schema_prop)
+            if allowed_values:
+                value = resolve_custom_option_item(value, allowed_values)
+
     href = resolve_link_href(field_name, value, schema_prop)
     if href is None:
         return {"href": None}
     return {"href": href}
+
+
+def build_link_payload(
+    field_name: str,
+    value: Any,
+    schema_prop: Optional[Dict[str, Any]] = None,
+) -> Any:
+    """Build HAL link object(s) for the PATCH payload."""
+    field_type = schema_prop.get("type") if schema_prop else None
+
+    if is_multi_value_field(field_type):
+        items = normalize_multi_value_input(value)
+        if not items:
+            return []
+
+        links: List[Dict[str, Any]] = []
+        for item in items:
+            prepared = prepare_link_item_value(field_name, item, schema_prop)
+            link = build_single_link_payload(field_name, prepared, schema_prop)
+            if link.get("href") is not None:
+                links.append(link)
+        return links
+
+    return build_single_link_payload(field_name, value, schema_prop)
 
 
 def attribute_uses_links(
@@ -593,7 +696,8 @@ def format_custom_field_values(
         text += "\n"
 
     text += (
-        "Use option IDs (or titles) with `set_work_package_attributes` when setting "
-        "list custom fields.\n"
+        "Use option IDs or titles with `set_work_package_attributes`. "
+        "For multi-select fields (`[]CustomOption`), pass an array such as "
+        "`[10, 62]` or `[\"Formumat\", \"Core\"]`. Use `[]` or `null` to clear.\n"
     )
     return text

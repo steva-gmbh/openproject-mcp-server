@@ -187,6 +187,61 @@ def test_attribute_utilities():
     assert "Dirk Grappendorf" not in formatted
     print("✅ format_custom_field_values")
 
+    multi_schema = {
+        "customField4": {
+            "name": "dot-Komponenten",
+            "type": "[]CustomOption",
+            "location": "_links",
+            "writable": True,
+            "_embedded": {
+                "allowedValues": [
+                    {"id": 10, "value": "Formumat"},
+                    {"id": 62, "value": "Core"},
+                ]
+            },
+        },
+        "customField7": {
+            "name": "Single option",
+            "type": "CustomOption",
+            "location": "_links",
+            "writable": True,
+            "_embedded": {
+                "allowedValues": [{"id": 10, "value": "Formumat"}]
+            },
+        },
+    }
+
+    payload = build_update_payload({"customField4": [10, 62]}, multi_schema)
+    assert payload["_links"]["customField4"] == [
+        {"href": "/api/v3/custom_options/10"},
+        {"href": "/api/v3/custom_options/62"},
+    ]
+
+    payload = build_update_payload({"customField4": 10}, multi_schema)
+    assert payload["_links"]["customField4"] == [{"href": "/api/v3/custom_options/10"}]
+
+    payload = build_update_payload({"customField4": "10,62"}, multi_schema)
+    assert len(payload["_links"]["customField4"]) == 2
+
+    payload = build_update_payload({"customField4": []}, multi_schema)
+    assert payload["_links"]["customField4"] == []
+
+    payload = build_update_payload({"customField4": None}, multi_schema)
+    assert payload["_links"]["customField4"] == []
+
+    payload = build_update_payload(
+        {"customField4": ["Formumat", "Core"]},
+        multi_schema,
+    )
+    assert payload["_links"]["customField4"] == [
+        {"href": "/api/v3/custom_options/10"},
+        {"href": "/api/v3/custom_options/62"},
+    ]
+
+    payload = build_update_payload({"customField7": 10}, multi_schema)
+    assert payload["_links"]["customField7"] == {"href": "/api/v3/custom_options/10"}
+    print("✅ build_update_payload multi-value custom fields")
+
     return True
 
 
@@ -456,7 +511,7 @@ async def test_client_attribute_update_flow():
     patched_wp = {"id": 123, "subject": "Updated", "lockVersion": 9}
 
     with patch.object(client, "get_work_package", AsyncMock(return_value=current_wp)), patch.object(
-        client, "get_work_package_schema", AsyncMock(return_value=schema)
+        client, "get_work_package_form_schema", AsyncMock(return_value=schema)
     ), patch.object(client, "validate_work_package_form", AsyncMock(return_value=form_result)), patch.object(
         client, "patch_work_package", AsyncMock(return_value=patched_wp)
     ) as mock_patch:
@@ -475,7 +530,7 @@ async def test_client_attribute_update_flow():
         print("✅ client update flow uses lockVersion and validated payload")
 
     with patch.object(client, "get_work_package", AsyncMock(return_value=current_wp)), patch.object(
-        client, "get_work_package_schema", AsyncMock(return_value=schema)
+        client, "get_work_package_form_schema", AsyncMock(return_value=schema)
     ), patch.object(
         client,
         "validate_work_package_form",
