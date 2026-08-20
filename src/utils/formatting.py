@@ -183,13 +183,20 @@ def format_work_package_detail(wp: Dict) -> str:
         project = embedded['project']
         text += f"**Project**: {project.get('name', 'Unknown')}\n"
 
-    # Assignee is in _links
+    # Assignee / responsible are in _links
     assignee_link = links.get("assignee")
     if assignee_link:
         assignee_name = assignee_link.get("title", "Unknown")
         text += f"**Assignee**: {assignee_name}\n"
     else:
         text += f"**Assignee**: Unassigned\n"
+
+    responsible_link = links.get("responsible")
+    if responsible_link:
+        responsible_name = responsible_link.get("title", "Unknown")
+        text += f"**Responsible**: {responsible_name}\n"
+    else:
+        text += f"**Responsible**: None\n"
 
     # Dates
     if wp.get('startDate'):
@@ -214,6 +221,22 @@ def format_work_package_detail(wp: Dict) -> str:
     # Progress
     if 'percentageDone' in wp:
         text += f"\n**Progress**: {wp['percentageDone']}%\n"
+
+    custom_fields = []
+    for key, value in wp.items():
+        if key.startswith("customField") and value is not None:
+            custom_fields.append(f"**{key}**: {value}")
+
+    for key, link in links.items():
+        if key.startswith("customField") and isinstance(link, dict) and link.get("href"):
+            title = link.get("title")
+            custom_fields.append(
+                f"**{key}**: {title or link.get('href')}"
+            )
+
+    if custom_fields:
+        text += "\n**Custom Fields**:\n"
+        text += "\n".join(custom_fields) + "\n"
 
     return text
 

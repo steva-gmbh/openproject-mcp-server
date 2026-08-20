@@ -45,6 +45,27 @@ class UpdateWorkPackageInput(BaseModel):
     version_id: Optional[int] = Field(None, description="Version/milestone ID to assign work package to", gt=0)
 
 
+class SetWorkPackageAttributesInput(BaseModel):
+    """Input model for setting arbitrary work package attributes."""
+
+    work_package_id: int = Field(..., description="Work package ID to update", gt=0)
+    attributes: dict = Field(
+        ...,
+        description=(
+            "Attributes to set. Supports standard fields (subject, status_id, assignee_id, "
+            "responsible_id, start_date, percentage_done), camelCase API names, and custom fields "
+            "(customField1, custom_field_12). Use null to clear link-backed fields."
+        ),
+    )
+    validate_form: bool = Field(
+        True,
+        description="Validate the payload via the OpenProject form endpoint before applying",
+    )
+    validate_custom_fields: bool = Field(
+        True,
+        description="Enable OpenProject custom field validation via _meta.validateCustomFields",
+    )
+
 @mcp.tool
 async def list_work_packages(
     # Existing parameters (backward compatible)
@@ -555,6 +576,171 @@ async def update_work_package(input: UpdateWorkPackageInput) -> str:
 
     except Exception as e:
         return format_error(f"Failed to update work package: {str(e)}")
+
+
+@mcp.tool
+async def get_work_package(work_package_id: int) -> str:
+    """Get detailed information about a specific work package.
+
+    Returns the full work package representation including assignee, responsible user,
+    dates, progress, and custom fields when present.
+
+    Args:
+        work_package_id: ID of the work package to retrieve
+
+    Returns:
+        Formatted work package details
+    """
+    try:
+        if work_package_id <= 0:
+            return format_error("work_package_id must be greater than 0")
+
+        client = get_client()
+        result = await client.get_work_package(work_package_id)
+        return format_work_package_detail(result)
+
+    except Exception as e:
+        return format_error(f"Failed to get work package: {str(e)}")
+
+
+@mcp.tool
+async def get_work_package_attributes(
+    work_package_id: int,
+    attributes: Optional[str] = None,
+    include_schema: bool = False,
+) -> str:
+    """Read arbitrary work package attributes, including custom fields.
+
+    Use this to inspect assignee, responsible user, custom fields, and other API-backed
+    properties. When `attributes` is omitted, returns all schema-defined properties
+    (recommended). When `include_schema` is true, each attribute includes writable/required
+    metadata from the OpenProject schema.
+
+    Args:
+        work_package_id: ID of the work package to read
+        attributes: Optional comma-separated attribute names (e.g. "assignee,responsible,customField1")
+        include_schema: Include schema metadata (writable, required, type, location)
+
+    Returns:
+        Formatted attribute values for the work package
+
+    Example:
+        Read assignee and responsible user:
+        {
+            "work_package_id": 123,
+            "attributes": "assignee,responsible"
+        }
+    """
+    try:
+        from src.utils.work_package_attributes import (
+            collect_readable_attributes,
+            format_work_package_attributes,
+            normalize_attribute_name,
+            parse_attribute_filter,
+        )
+
+        if work_package_id <= 0:
+            return format_error("work_package_id must be greater than 0")
+
+        client = get_client()
+        work_package = await client.get_work_package(work_package_id)
+        attribute_filter = parse_attribute_filter(attributes)
+        schema = await client.get_work_package_schema(work_package_id)
+
+        readable = collect_readable_attributes(
+            work_package,
+            schema=schema,
+            attribute_filter=attribute_filter,
+        )
+
+        if attribute_filter:
+            missing = attribute_filter - set(readable.keys())
+            if missing:
+                missing_list = ", ".join(sorted(missing))
+                return format_error(
+                    f"Unknown or empty attributes for work package #{work_package_id}: {missing_list}"
+                )
+
+        return format_work_package_attributes(
+            work_package,
+            readable,
+            include_schema=include_schema,
+        )
+
+    except Exception as e:
+        return format_error(f"Failed to get work package attributes: {str(e)}")
+
+
+@mcp.tool
+async def set_work_package_attributes(input: SetWorkPackageAttributesInput) -> str:
+    """Set arbitrary work package attributes, including custom fields and responsible user.
+
+    Supports standard fields, snake_case aliases (assignee_id, responsible_id, start_date),
+    camelCase API names (customField1), and HAL link values ({\"href\": \"/api/v3/users/7\"}).
+    Uses OpenProject optimistic locking (lockVersion) and optionally validates via the
+    work package form endpoint before applying changes.
+
+    Args:
+        input: Work package ID, attribute map, and validation options
+
+    Returns:
+        Success message with updated attribute values
+
+    Example:
+        Set assignee, responsible user, and a custom field:
+        {
+            "work_package_id": 123,
+            "attributes": {
+                "assignee_id": 7,
+                "responsible_id": 5,
+                "customField1": "Approved",
+                "percentage_done": 25
+            }
+        }
+
+        Clear assignee:
+        {
+            "work_package_id": 123,
+            "attributes": {
+                "assignee_id": null
+            }
+        }
+    """
+    try:
+        from src.utils.work_package_attributes import (
+            collect_readable_attributes,
+            format_work_package_attributes,
+            normalize_attribute_name,
+        )
+
+        if not input.attributes:
+            return format_error("No attributes provided to update")
+
+        client = get_client()
+        result = await client.update_work_package_attributes(
+            input.work_package_id,
+            input.attributes,
+            validate=input.validate_form,
+            validate_custom_fields=input.validate_custom_fields,
+        )
+
+        updated_attributes = collect_readable_attributes(
+            result,
+            schema=await client.get_work_package_schema(input.work_package_id),
+            attribute_filter={
+                normalize_attribute_name(key)
+                for key in input.attributes.keys()
+            },
+        )
+
+        text = format_success(
+            f"Work package #{input.work_package_id} attributes updated successfully!\n\n"
+        )
+        text += format_work_package_attributes(result, updated_attributes)
+        return text
+
+    except Exception as e:
+        return format_error(f"Failed to set work package attributes: {str(e)}")
 
 
 @mcp.tool

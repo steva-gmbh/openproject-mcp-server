@@ -431,6 +431,124 @@ class OpenProjectClient:
         """
         return await self._request("GET", f"/work_packages/{work_package_id}")
 
+    async def get_work_package_schema_by_href(self, schema_href: str) -> Dict:
+        """
+        Retrieve a work package schema by its HAL href.
+
+        Args:
+            schema_href: Schema href from a work package _links.schema entry
+
+        Returns:
+            Dict: Work package schema definition
+        """
+        if schema_href.startswith("http"):
+            schema_path = schema_href.split("/api/v3", 1)[-1]
+        elif schema_href.startswith("/api/v3"):
+            schema_path = schema_href.replace("/api/v3", "", 1)
+        else:
+            schema_path = schema_href if schema_href.startswith("/") else f"/{schema_href}"
+
+        return await self._request("GET", schema_path)
+
+    async def get_work_package_schema(self, work_package_id: int) -> Dict:
+        """
+        Retrieve the schema for a specific work package.
+
+        Args:
+            work_package_id: The work package ID
+
+        Returns:
+            Dict: Work package schema definition
+        """
+        work_package = await self.get_work_package(work_package_id)
+        schema_href = work_package.get("_links", {}).get("schema", {}).get("href")
+        if not schema_href:
+            raise Exception(
+                f"Work package #{work_package_id} does not expose a schema link"
+            )
+        return await self.get_work_package_schema_by_href(schema_href)
+
+    async def validate_work_package_form(
+        self, work_package_id: int, payload: Dict
+    ) -> Dict:
+        """
+        Validate a work package update payload using the form endpoint.
+
+        Args:
+            work_package_id: The work package ID
+            payload: Proposed update payload
+
+        Returns:
+            Dict: Form response including validationErrors and payload
+        """
+        return await self._request(
+            "POST", f"/work_packages/{work_package_id}/form", payload
+        )
+
+    async def patch_work_package(self, work_package_id: int, payload: Dict) -> Dict:
+        """
+        Patch a work package with a prepared payload.
+
+        Args:
+            work_package_id: The work package ID
+            payload: Full PATCH payload including lockVersion
+
+        Returns:
+            Dict: Updated work package data
+        """
+        return await self._request(
+            "PATCH", f"/work_packages/{work_package_id}", payload
+        )
+
+    async def update_work_package_attributes(
+        self,
+        work_package_id: int,
+        attributes: Dict[str, Any],
+        validate: bool = True,
+        validate_custom_fields: bool = True,
+    ) -> Dict:
+        """
+        Update arbitrary work package attributes with optimistic locking.
+
+        Args:
+            work_package_id: The work package ID
+            attributes: Attribute names/values to update
+            validate: Validate payload via form endpoint before PATCH
+            validate_custom_fields: Enable custom field validation via _meta
+
+        Returns:
+            Dict: Updated work package data
+        """
+        from src.utils.work_package_attributes import build_update_payload
+
+        current_wp = await self.get_work_package(work_package_id)
+        schema = await self.get_work_package_schema(work_package_id)
+
+        payload = build_update_payload(attributes, schema)
+        payload["lockVersion"] = current_wp.get("lockVersion", 0)
+
+        if validate_custom_fields:
+            payload["_meta"] = {"validateCustomFields": True}
+
+        if validate:
+            form_result = await self.validate_work_package_form(work_package_id, payload)
+            validation_errors = form_result.get("_embedded", {}).get(
+                "validationErrors", {}
+            )
+            if validation_errors:
+                raise Exception(
+                    f"Validation failed: {json.dumps(validation_errors, ensure_ascii=False)}"
+                )
+
+            validated_payload = form_result.get("_embedded", {}).get("payload")
+            if validated_payload:
+                payload = validated_payload
+                payload["lockVersion"] = current_wp.get("lockVersion", 0)
+                if validate_custom_fields and "_meta" not in payload:
+                    payload["_meta"] = {"validateCustomFields": True}
+
+        return await self.patch_work_package(work_package_id, payload)
+
     async def update_work_package(self, work_package_id: int, data: Dict) -> Dict:
         """
         Update an existing work package.
