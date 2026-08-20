@@ -117,6 +117,76 @@ def test_attribute_utilities():
     assert "Alice" in format_attribute_value({"id": 7, "title": "Alice"})
     print("✅ format_attribute_value")
 
+    from src.utils.work_package_attributes import (
+        extract_custom_field_options,
+        format_custom_field_values,
+    )
+
+    form_schema = {
+        "customField4": {
+            "name": "dot-Komponenten",
+            "type": "[]CustomOption",
+            "location": "_links",
+            "writable": True,
+            "required": False,
+            "_embedded": {
+                "allowedValues": [
+                    {"id": 62, "value": "Core"},
+                    {"id": 8, "value": "DMS"},
+                    {"id": 9, "value": "EMS"},
+                    {"id": 10, "value": "Formumat"},
+                    {"id": 61, "value": "KI"},
+                    {"id": 11, "value": "Orga"},
+                    {"id": 12, "value": "PMS"},
+                    {"id": 13, "value": "Report"},
+                    {"id": 16, "value": "Templating"},
+                    {"id": 18, "value": "Webdesigner"},
+                    {"id": 54, "value": "Webformumat"},
+                    {"id": 60, "value": "Work"},
+                ]
+            },
+        },
+        "customField9": {
+            "name": "Reporter",
+            "type": "User",
+            "location": "_links",
+            "writable": True,
+            "required": False,
+            "_embedded": {
+                "allowedValues": [{"id": 6, "value": "Dirk Grappendorf"}]
+            },
+        },
+        "customField1": {
+            "name": "Angebotsnummer",
+            "type": "String",
+            "writable": True,
+            "required": False,
+        },
+    }
+
+    all_fields = extract_custom_field_options(form_schema)
+    assert len(all_fields) == 3
+    dot_field = next(item for item in all_fields if item["api_name"] == "customField4")
+    assert dot_field["label"] == "dot-Komponenten"
+    assert len(dot_field["options"]) == 12
+    reporter_field = next(item for item in all_fields if item["api_name"] == "customField9")
+    assert "options" not in reporter_field
+    print("✅ extract_custom_field_options")
+
+    filtered = extract_custom_field_options(form_schema, field_filter="dot-Komponenten")
+    assert len(filtered) == 1
+    assert filtered[0]["api_name"] == "customField4"
+    filtered_api = extract_custom_field_options(form_schema, field_filter="customField4")
+    assert len(filtered_api) == 1
+    print("✅ extract_custom_field_options filter")
+
+    formatted = format_custom_field_values(filtered, context="project #12")
+    assert "dot-Komponenten" in formatted
+    assert "**Formumat** (ID: 10)" in formatted
+    assert "set_work_package_attributes" in formatted
+    assert "Dirk Grappendorf" not in formatted
+    print("✅ format_custom_field_values")
+
     return True
 
 
@@ -156,8 +226,14 @@ async def test_tools_with_mocks():
         SetWorkPackageAttributesInput,
         get_work_package,
         get_work_package_attributes,
+        list_custom_field_values,
         set_work_package_attributes,
     )
+
+    get_work_package = get_work_package.fn
+    get_work_package_attributes = get_work_package_attributes.fn
+    set_work_package_attributes = set_work_package_attributes.fn
+    list_custom_field_values = list_custom_field_values.fn
 
     sample_wp = {
         "id": 123,
@@ -275,6 +351,81 @@ async def test_tools_with_mocks():
         assert "Validation failed" in result
         print("✅ validation error handling")
 
+    form_schema = {
+        "customField4": {
+            "name": "dot-Komponenten",
+            "type": "[]CustomOption",
+            "location": "_links",
+            "writable": True,
+            "required": False,
+            "_embedded": {
+                "allowedValues": [
+                    {"id": 62, "value": "Core"},
+                    {"id": 10, "value": "Formumat"},
+                ]
+            },
+        }
+    }
+
+    print("\n[3.5] list_custom_field_values via work_package_id")
+    with patch("src.tools.work_packages.get_client") as mock_get_client:
+        mock_client = AsyncMock()
+        mock_client.get_work_package_form_schema = AsyncMock(return_value=form_schema)
+        mock_get_client.return_value = mock_client
+
+        result = await list_custom_field_values(
+            work_package_id=991,
+            field="dot-Komponenten",
+        )
+        mock_client.get_work_package_form_schema.assert_awaited_once_with(991)
+        assert "dot-Komponenten" in result
+        assert "**Formumat** (ID: 10)" in result
+        print("✅ list_custom_field_values work package path")
+
+    print("\n[3.6] list_custom_field_values via project_id")
+    with patch("src.tools.work_packages.get_client") as mock_get_client:
+        mock_client = AsyncMock()
+        mock_client.get_project_work_package_form = AsyncMock(
+            return_value={"_embedded": {"schema": form_schema}}
+        )
+        mock_get_client.return_value = mock_client
+
+        result = await list_custom_field_values(
+            project_id=12,
+            type_id=11,
+            field="customField4",
+        )
+        mock_client.get_project_work_package_form.assert_awaited_once_with(12, 11)
+        assert "project #12, type #11" in result
+        assert "**Core** (ID: 62)" in result
+        print("✅ list_custom_field_values project path")
+
+    print("\n[3.7] list_custom_field_values validation")
+    result = await list_custom_field_values()
+    assert "❌" in result
+    assert "Provide either work_package_id or project_id" in result
+
+    result = await list_custom_field_values(work_package_id=991, project_id=12)
+    assert "❌" in result
+    assert "not both" in result
+
+    result = await list_custom_field_values(work_package_id=991, type_id=11)
+    assert "❌" in result
+    assert "type_id can only be used with project_id" in result
+
+    with patch("src.tools.work_packages.get_client") as mock_get_client:
+        mock_client = AsyncMock()
+        mock_client.get_work_package_form_schema = AsyncMock(return_value=form_schema)
+        mock_get_client.return_value = mock_client
+
+        result = await list_custom_field_values(
+            work_package_id=991,
+            field="missing-field",
+        )
+        assert "❌" in result
+        assert "No custom field matching" in result
+    print("✅ list_custom_field_values validation")
+
     return True
 
 
@@ -344,6 +495,28 @@ async def test_client_attribute_update_flow():
             assert "Validation failed" in str(exc)
             mock_patch.assert_not_called()
             print("✅ client rejects invalid form payloads")
+
+    form_schema = {"customField4": {"name": "dot-Komponenten", "type": "[]CustomOption"}}
+    form_result = {"_embedded": {"schema": form_schema}}
+
+    with patch.object(client, "get_work_package", AsyncMock(return_value=current_wp)), patch.object(
+        client, "validate_work_package_form", AsyncMock(return_value=form_result)
+    ) as mock_form:
+        schema = await client.get_work_package_form_schema(123)
+        assert schema == form_schema
+        mock_form.assert_awaited_once_with(123, {"lockVersion": 8})
+        print("✅ get_work_package_form_schema sends lockVersion")
+
+    with patch.object(
+        client, "_request", AsyncMock(return_value={"_embedded": {"schema": form_schema}})
+    ) as mock_request:
+        await client.get_project_work_package_form(12, 11)
+        mock_request.assert_awaited_once_with(
+            "POST",
+            "/projects/12/work_packages/form",
+            {"_links": {"type": {"href": "/api/v3/types/11"}}},
+        )
+        print("✅ get_project_work_package_form posts type link")
 
     return True
 

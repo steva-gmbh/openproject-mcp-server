@@ -401,7 +401,28 @@ Search for work package by ID: "123"
 
 **Note:** This tool provides fast search without needing to paginate through all tasks. Use this when you need to find specific tasks by name or ID.
 
-#### 5. `list_types`
+#### 5. `list_custom_field_values`
+List allowed values for work package custom fields such as list/select options.
+
+OpenProject only exposes custom-field option lists on the work package form endpoint. Use this before setting list custom fields via `set_work_package_attributes`.
+
+**Parameters:**
+- `work_package_id` (integer, optional): Existing work package ID
+- `project_id` (integer, optional): Project ID for the create-work-package form schema
+- `type_id` (integer, optional): Work package type ID (only with `project_id`)
+- `field` (string, optional): Filter by label (`dot-Komponenten`), API name (`customField4`), or snake_case alias (`custom_field_4`)
+
+Provide exactly one of `work_package_id` or `project_id`.
+
+**Example:**
+```
+List allowed values for dot-Komponenten in project 12
+```
+```
+List custom field values for work package 991
+```
+
+#### 6. `list_types`
 List available work package types.
 
 **Parameters:**
@@ -412,7 +433,7 @@ List available work package types.
 List all work package types
 ```
 
-#### 6. `create_work_package`
+#### 7. `create_work_package`
 Create a new work package.
 
 **Parameters:**
@@ -428,32 +449,32 @@ Create a new work package.
 Create a new task in project 5 titled "Update documentation" with type ID 1
 ```
 
-#### 7. `list_users`
+#### 8. `list_users`
 List all users in the OpenProject instance.
 
 **Parameters:**
 - `active_only` (boolean, optional): Show only active users (default: true)
 
-#### 8. `get_user`
+#### 9. `get_user`
 Get detailed information about a specific user.
 
 **Parameters:**
 - `user_id` (integer, required): User ID
 
-#### 9. `list_memberships`
+#### 10. `list_memberships`
 List project memberships showing users and their roles.
 
 **Parameters:**
 - `project_id` (integer, optional): Filter by specific project
 - `user_id` (integer, optional): Filter by specific user
 
-#### 10. `list_statuses`
+#### 11. `list_statuses`
 List all available work package statuses.
 
-#### 11. `list_priorities`
+#### 12. `list_priorities`
 List all available work package priorities.
 
-#### 12. `get_work_package`
+#### 13. `get_work_package`
 Get detailed information about a specific work package.
 
 **Parameters:**
@@ -891,7 +912,7 @@ All these tools have been tested and work correctly with admin privileges:
 - `delete_project`, `get_project`
 
 **Work Package Management:**
-- `list_work_packages`, `search_work_packages`, `list_types`, `create_work_package`, `update_work_package`
+- `list_work_packages`, `search_work_packages`, `list_custom_field_values`, `list_types`, `create_work_package`, `update_work_package`
 - `delete_work_package`, `get_work_package`, `list_statuses`, `list_priorities`
 
 **Work Package Hierarchy & Relations:**

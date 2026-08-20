@@ -460,3 +460,140 @@ def format_validation_errors(validation_errors: Dict[str, Any]) -> str:
             message = message.get("message", str(message))
         lines.append(f"- {field}: {message}")
     return "\n".join(lines)
+
+
+def is_custom_option_field(field_type: Optional[str]) -> bool:
+    """Return True when a schema field type stores CustomOption values."""
+    return field_type in {"CustomOption", "[]CustomOption"}
+
+
+def matches_custom_field_filter(
+    prop_name: str, prop_def: Dict[str, Any], field_filter: Optional[str]
+) -> bool:
+    """Return True when a custom field matches an optional filter."""
+    if not field_filter:
+        return True
+
+    normalized_filter = normalize_attribute_name(field_filter)
+    normalized_name = normalize_attribute_name(prop_name)
+    if normalized_filter == normalized_name:
+        return True
+
+    label = prop_def.get("name", "")
+    return field_filter.strip().casefold() == label.casefold()
+
+
+def parse_allowed_values(prop_def: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Extract allowed custom-field option values from a form schema property."""
+    options: List[Dict[str, Any]] = []
+
+    embedded_values = prop_def.get("_embedded", {}).get("allowedValues")
+    if isinstance(embedded_values, list):
+        for item in embedded_values:
+            if not isinstance(item, dict):
+                continue
+            options.append(
+                {
+                    "id": item.get("id"),
+                    "value": item.get("value") or item.get("title"),
+                }
+            )
+        return options
+
+    allowed_links = prop_def.get("_links", {}).get("allowedValues")
+    if isinstance(allowed_links, list):
+        for link in allowed_links:
+            if not isinstance(link, dict):
+                continue
+            href = link.get("href", "")
+            options.append(
+                {
+                    "id": extract_id_from_href(href),
+                    "value": link.get("title"),
+                }
+            )
+    elif isinstance(allowed_links, dict):
+        href = allowed_links.get("href", "")
+        options.append(
+            {
+                "id": extract_id_from_href(href),
+                "value": allowed_links.get("title"),
+            }
+        )
+
+    return options
+
+
+def extract_custom_field_options(
+    schema: Dict[str, Any], field_filter: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """Collect custom-field metadata and allowed values from a form schema."""
+    fields: List[Dict[str, Any]] = []
+
+    for prop_name, prop_def in schema.items():
+        if prop_name.startswith("_") or not CUSTOM_FIELD_PATTERN.match(prop_name):
+            continue
+        if not isinstance(prop_def, dict):
+            continue
+        if not matches_custom_field_filter(prop_name, prop_def, field_filter):
+            continue
+
+        field_type = prop_def.get("type")
+        field_info: Dict[str, Any] = {
+            "api_name": normalize_attribute_name(prop_name),
+            "label": prop_def.get("name", prop_name),
+            "type": field_type,
+            "writable": prop_def.get("writable", False),
+            "required": prop_def.get("required", False),
+        }
+
+        if is_custom_option_field(field_type):
+            field_info["options"] = parse_allowed_values(prop_def)
+
+        fields.append(field_info)
+
+    return sorted(fields, key=lambda item: item["api_name"])
+
+
+def format_custom_field_values(
+    fields: List[Dict[str, Any]], context: str = ""
+) -> str:
+    """Format custom-field allowed values for MCP tool output."""
+    if not fields:
+        return "No matching custom fields found."
+
+    text = "✅ **Custom Field Values"
+    if context:
+        text += f" ({context})"
+    text += ":**\n\n"
+
+    for field in fields:
+        label = field.get("label", field.get("api_name"))
+        api_name = field.get("api_name")
+        field_type = field.get("type", "Unknown")
+
+        text += f"### {label}\n"
+        text += f"- **API name**: `{api_name}`\n"
+        text += f"- **Type**: {field_type}\n"
+        text += f"- **Writable**: {'yes' if field.get('writable') else 'no'}"
+        if field.get("required"):
+            text += " | **Required**: yes"
+        text += "\n"
+
+        options = field.get("options")
+        if options:
+            text += f"\n**Allowed values ({len(options)}):**\n"
+            for option in options:
+                text += f"- **{option.get('value')}** (ID: {option.get('id')})\n"
+        elif is_custom_option_field(field_type):
+            text += "\nNo allowed values returned for this field.\n"
+        else:
+            text += f"\n*Allowed values not listed for type `{field_type}`.*\n"
+
+        text += "\n"
+
+    text += (
+        "Use option IDs (or titles) with `set_work_package_attributes` when setting "
+        "list custom fields.\n"
+    )
+    return text

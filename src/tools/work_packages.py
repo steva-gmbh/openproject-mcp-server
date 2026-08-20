@@ -672,6 +672,91 @@ async def get_work_package_attributes(
 
 
 @mcp.tool
+async def list_custom_field_values(
+    work_package_id: Optional[int] = None,
+    project_id: Optional[int] = None,
+    type_id: Optional[int] = None,
+    field: Optional[str] = None,
+) -> str:
+    """List allowed values for work package custom fields.
+
+    OpenProject only exposes custom-field option lists on the work package form
+    endpoint, not on the static schema endpoint. Use this tool before setting
+    list custom fields such as `dot-Komponenten` via `set_work_package_attributes`.
+
+    Provide exactly one of `work_package_id` or `project_id`. When using
+    `project_id`, optionally pass `type_id` to load type-specific custom fields.
+    Use `field` to filter by label (e.g. "dot-Komponenten"), API name
+    (`customField4`), or snake_case alias (`custom_field_4`).
+
+    Args:
+        work_package_id: Existing work package ID
+        project_id: Project ID for the create-work-package form schema
+        type_id: Optional work package type ID (only with project_id)
+        field: Optional custom field filter
+
+    Returns:
+        Allowed custom-field values with option IDs for list/select fields
+
+    Example:
+        List values for dot-Komponenten in project 12:
+        {
+            "project_id": 12,
+            "type_id": 11,
+            "field": "dot-Komponenten"
+        }
+    """
+    try:
+        from src.utils.work_package_attributes import (
+            extract_custom_field_options,
+            format_custom_field_values,
+        )
+
+        if work_package_id is not None and project_id is not None:
+            return format_error("Provide either work_package_id or project_id, not both")
+
+        if work_package_id is None and project_id is None:
+            return format_error("Provide either work_package_id or project_id")
+
+        if type_id is not None and work_package_id is not None:
+            return format_error("type_id can only be used with project_id")
+
+        client = get_client()
+
+        if work_package_id is not None:
+            if work_package_id <= 0:
+                return format_error("work_package_id must be greater than 0")
+
+            schema = await client.get_work_package_form_schema(work_package_id)
+            context = f"work package #{work_package_id}"
+        else:
+            if project_id <= 0:
+                return format_error("project_id must be greater than 0")
+            if type_id is not None and type_id <= 0:
+                return format_error("type_id must be greater than 0")
+
+            form = await client.get_project_work_package_form(project_id, type_id)
+            schema = form.get("_embedded", {}).get("schema")
+            if not schema:
+                return format_error(
+                    f"Form response for project #{project_id} did not include a schema"
+                )
+
+            context = f"project #{project_id}"
+            if type_id is not None:
+                context += f", type #{type_id}"
+
+        fields = extract_custom_field_options(schema, field_filter=field)
+        if field and not fields:
+            return format_error(f"No custom field matching '{field}' found")
+
+        return format_custom_field_values(fields, context=context)
+
+    except Exception as e:
+        return format_error(f"Failed to list custom field values: {str(e)}")
+
+
+@mcp.tool
 async def set_work_package_attributes(input: SetWorkPackageAttributesInput) -> str:
     """Set arbitrary work package attributes, including custom fields and responsible user.
 

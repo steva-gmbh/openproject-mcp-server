@@ -485,6 +485,55 @@ class OpenProjectClient:
             "POST", f"/work_packages/{work_package_id}/form", payload
         )
 
+    async def get_project_work_package_form(
+        self, project_id: int, type_id: Optional[int] = None
+    ) -> Dict:
+        """
+        Retrieve the work package creation form for a project.
+
+        The form response includes a schema with custom-field allowedValues that
+        are not present on the static schema endpoint.
+
+        Args:
+            project_id: The project ID
+            type_id: Optional work package type ID to scope type-specific fields
+
+        Returns:
+            Dict: Form response including _embedded.schema
+        """
+        payload: Dict[str, Any] = {}
+        if type_id is not None:
+            payload["_links"] = {"type": {"href": f"/api/v3/types/{type_id}"}}
+
+        return await self._request(
+            "POST", f"/projects/{project_id}/work_packages/form", payload
+        )
+
+    async def get_work_package_form_schema(self, work_package_id: int) -> Dict:
+        """
+        Retrieve the form schema for an existing work package.
+
+        Uses the form endpoint with lockVersion so custom-field allowedValues are
+        included in the returned schema.
+
+        Args:
+            work_package_id: The work package ID
+
+        Returns:
+            Dict: Work package form schema from _embedded.schema
+        """
+        work_package = await self.get_work_package(work_package_id)
+        lock_version = work_package.get("lockVersion", 0)
+        form = await self.validate_work_package_form(
+            work_package_id, {"lockVersion": lock_version}
+        )
+        schema = form.get("_embedded", {}).get("schema")
+        if not schema:
+            raise Exception(
+                f"Work package form for #{work_package_id} did not return a schema"
+            )
+        return schema
+
     async def patch_work_package(self, work_package_id: int, payload: Dict) -> Dict:
         """
         Patch a work package with a prepared payload.
